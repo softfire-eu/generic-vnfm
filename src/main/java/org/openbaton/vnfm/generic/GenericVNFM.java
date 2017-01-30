@@ -52,12 +52,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class GenericVNFM extends AbstractVnfmSpringAmqp {
 
-  @Autowired private ElementManagementSystem ems;
-
   @Autowired private LifeCycleManagement lcm;
-
-  @Value("${vnfm.ems.userdata.filepath:/etc/openbaton/openbaton-vnfm-generic-user-data.sh}")
-  private String userDataFilePath;
 
   public static void main(String[] args) {
     SpringApplication.run(GenericVNFM.class, args);
@@ -77,23 +72,23 @@ public class GenericVNFM extends AbstractVnfmSpringAmqp {
 
     log.info(
         "Instantiation of VirtualNetworkFunctionRecord " + virtualNetworkFunctionRecord.getName());
-    for (VirtualDeploymentUnit virtualDeploymentUnit : virtualNetworkFunctionRecord.getVdu()) {
-      for (VNFCInstance vnfcInstance : virtualDeploymentUnit.getVnfc_instance()) {
-        ems.register(vnfcInstance.getHostname());
-      }
-    }
-    for (VirtualDeploymentUnit virtualDeploymentUnit : virtualNetworkFunctionRecord.getVdu()) {
-      for (VNFCInstance vnfcInstance : virtualDeploymentUnit.getVnfc_instance()) {
-        try {
-          ems.checkEms(vnfcInstance.getHostname());
-        } catch (BadFormatException e) {
-          throw new Exception(e.getMessage());
-        }
-      }
-    }
-    if (null != scripts) {
-      ems.saveScriptOnEms(virtualNetworkFunctionRecord, scripts);
-    }
+//    for (VirtualDeploymentUnit virtualDeploymentUnit : virtualNetworkFunctionRecord.getVdu()) {
+//      for (VNFCInstance vnfcInstance : virtualDeploymentUnit.getVnfc_instance()) {
+//        ems.register(vnfcInstance.getHostname());
+//      }
+//    }
+//    for (VirtualDeploymentUnit virtualDeploymentUnit : virtualNetworkFunctionRecord.getVdu()) {
+//      for (VNFCInstance vnfcInstance : virtualDeploymentUnit.getVnfc_instance()) {
+//        try {
+//          ems.checkEms(vnfcInstance.getHostname());
+//        } catch (BadFormatException e) {
+//          throw new Exception(e.getMessage());
+//        }
+//      }
+//    }
+//    if (null != scripts) {
+//      ems.saveScriptOnEms(virtualNetworkFunctionRecord, scripts);
+//    }
 
     for (VirtualDeploymentUnit virtualDeploymentUnit : virtualNetworkFunctionRecord.getVdu()) {
       for (VNFCInstance vnfcInstance : virtualDeploymentUnit.getVnfc_instance()) {
@@ -126,50 +121,6 @@ public class GenericVNFM extends AbstractVnfmSpringAmqp {
     VNFCInstance vnfcInstance = (VNFCInstance) component;
     if (scaleInOrOut.ordinal() == Action.SCALE_OUT.ordinal()) {
       log.info("Created VNFComponent");
-      try {
-        ems.register(vnfcInstance.getHostname());
-        ems.checkEms(vnfcInstance.getHostname());
-      } catch (BadFormatException e) {
-        throw new Exception(e.getMessage());
-      }
-      ems.saveScriptOnEms(vnfcInstance, scripts, virtualNetworkFunctionRecord);
-      String output = "\n--------------------\n--------------------\n";
-      for (String result :
-          lcm.executeScriptsForEvent(
-              virtualNetworkFunctionRecord, vnfcInstance, Event.INSTANTIATE)) {
-        output += JsonUtils.parse(result);
-        output += "\n--------------------\n";
-      }
-      output += "\n--------------------\n";
-      log.info("Executed script for INSTANTIATE. Output was: \n\n" + output);
-
-      if (dependency != null) {
-        output = "\n--------------------\n--------------------\n";
-        for (String result :
-            lcm.executeScriptsForEvent(
-                virtualNetworkFunctionRecord, vnfcInstance, Event.CONFIGURE, dependency)) {
-          output += JsonUtils.parse(result);
-          output += "\n--------------------\n";
-        }
-        output += "\n--------------------\n";
-        log.info("Executed script for CONFIGURE. Output was: \n\n" + output);
-      }
-
-      if ((vnfcInstance.getState() == null) || !vnfcInstance.getState().equals("STANDBY")) {
-        if (VnfmUtils.getLifecycleEvent(
-                virtualNetworkFunctionRecord.getLifecycle_event(), Event.START)
-            != null) {
-          output = "\n--------------------\n--------------------\n";
-          for (String result :
-              lcm.executeScriptsForEvent(virtualNetworkFunctionRecord, vnfcInstance, Event.START)) {
-            output += JsonUtils.parse(result);
-            output += "\n--------------------\n";
-          }
-          output += "\n--------------------\n";
-          log.info("Executed script for START. Output was: \n\n" + output);
-        }
-      }
-
       log.trace("HB_VERSION == " + virtualNetworkFunctionRecord.getHb_version());
       return virtualNetworkFunctionRecord;
     } else { // SCALE_IN
@@ -261,17 +212,7 @@ public class GenericVNFM extends AbstractVnfmSpringAmqp {
       VirtualNetworkFunctionRecord virtualNetworkFunctionRecord,
       VNFCInstance vnfcInstance)
       throws Exception {
-    JsonObject jsonMessage =
-        JsonUtils.getJsonObjectForScript(
-            "SCRIPTS_UPDATE",
-            Base64.encodeBase64String(script.getPayload()),
-            script.getName(),
-            properties.getProperty("script-path", "/opt/openbaton/scripts"));
-    ems.executeActionOnEMS(
-        vnfcInstance.getHostname(),
-        jsonMessage.toString(),
-        virtualNetworkFunctionRecord,
-        vnfcInstance);
+
   }
 
   @Override
@@ -333,15 +274,6 @@ public class GenericVNFM extends AbstractVnfmSpringAmqp {
       }
       output += "\n--------------------\n";
       log.info("Executed script for TERMINATE. Output was: \n\n" + output);
-    }
-
-    for (VirtualDeploymentUnit vdu : virtualNetworkFunctionRecord.getVdu()) {
-      for (VNFCInstance vnfci : vdu.getVnfc_instance()) {
-        if (ems.getExpectedHostnames().contains(vnfci.getHostname())) {
-          log.warn("Canceling wait of EMS for: " + vnfci.getHostname());
-          ems.unregister(vnfci.getHostname());
-        }
-      }
     }
 
     return virtualNetworkFunctionRecord;
@@ -515,41 +447,11 @@ public class GenericVNFM extends AbstractVnfmSpringAmqp {
     super.setup();
     String scriptPath = properties.getProperty("script-path", "/opt/openbaton/scripts");
     LogUtils.init();
-    ems.init(scriptPath, vnfmHelper);
   }
 
   @Override
   protected String getUserData() {
-    String result;
-    try {
-      log.info("Attempting Userdata file (from properties file): " + userDataFilePath);
-      result = convertStreamToString(new FileInputStream(userDataFilePath));
-    } catch (FileNotFoundException e) {
-      log.warn("Userdata file not found: " + userDataFilePath);
-      try {
-        log.warn("Attempting Userdata file (from classpath): /user-data.sh");
-        result = convertStreamToString(AbstractVnfm.class.getResourceAsStream("/user-data.sh"));
-      } catch (NullPointerException npe) {
-        log.error("Userdata file not found: '/user-data.sh'");
-        throw npe;
-      }
-    }
-
-    log.debug(ems.getEmsVersion());
-
-    result = result.replace("export MONITORING_IP=", "export MONITORING_IP=" + monitoringIp);
-    result = result.replace("export TIMEZONE=", "export TIMEZONE=" + timezone);
-    result = result.replace("export BROKER_IP=", "export BROKER_IP=" + brokerIp);
-    result = result.replace("export BROKER_PORT=", "export BROKER_PORT=" + brokerPort);
-    result = result.replace("export USERNAME=", "export USERNAME=" + username);
-    result = result.replace("export PASSWORD=", "export PASSWORD=" + password);
-    result = result.replace("export EXCHANGE_NAME=", "export EXCHANGE_NAME=" + exchangeName);
-    result =
-        result.replace("export EMS_HEARTBEAT=", "export EMS_HEARTBEAT=" + ems.getEmsHeartbeat());
-    result =
-        result.replace("export EMS_AUTODELETE=", "export EMS_AUTODELETE=" + ems.getEmsAutodelete());
-    result = result.replace("export EMS_VERSION=", "export EMS_VERSION=" + ems.getEmsVersion());
-    result = result.replace("export ENDPOINT=", "export ENDPOINT=" + type);
+    String result = "";
 
     return result;
   }

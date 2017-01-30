@@ -190,6 +190,8 @@ public class ElementManagementSystem implements EmsInterface {
       Iterable<Script> scriptSet = (Set<Script>) scripts;
 
       for (Script script : scriptSet) {
+        // Skip the eventual userdata
+        if (script.getName().equals("userdata")) continue;
         log.debug("Sending script encoded base64 ");
         String base64String = Base64.encodeBase64String(script.getPayload());
         log.trace("The base64 string is: " + base64String);
