@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 export MONITORING_IP=
 export TIMEZONE=
@@ -26,6 +26,72 @@ export LC_COLLATE=C
 export LC_CTYPE=en_US.UTF-8
 source /etc/bashrc
 
+
+################
+### SoftFIRE ###
+################
+
+ipConfigUbuntu() {
+	MYIP=$(ifconfig  | grep 'inet addr:'| grep -v '127.0.0.1' | cut -d: -f2 | awk '{ print $1}')
+}
+
+ipConfigCentos() {
+	MYIP=$(ifconfig | grep '\binet\b'| grep -v '127.0.0.1' | cut -d: -f2 | awk '{print $2}')
+}
+
+waitForInternet() {
+	for i in {1..10}; do
+		if curl --fail --head --silent get.openbaton.org; then
+			echo "internet connection is ok! count: $CNT"
+			break
+		else
+			echo "waiting for Internet... loop $i sleep 15";
+			sleep 15;
+		fi
+	done
+}
+
+detectTestbed() {
+	if (echo "$MYIP" | grep -qE '192\.168\.100\.[0-9]{1,3}'); then
+		echo "IP range ($MYIP) detected as FOKUS OpenSDNcore"
+		echo "disabling rx and tx offloading..."
+		for iface in `ls /sys/class/net/`; do ethtool -K $iface rx off tx off gro off tso off; done
+	fi
+
+	if (echo "$MYIP" | grep -qE '192\.168\.221\.[0-9]{1,3}') || (echo "$MYIP" | grep -qE '172\.16\.13\.[0-9]{1,3}') || (echo "$MYIP" | grep -qE '192\.168\.74\.[0-9]{1,3}'); then
+		echo "IP range ($MYIP) detected as ericsson"
+		echo "adding proxy server to git and apt"
+		export http_proxy="http://10.42.137.126:8080"
+		export https_proxy="http://10.42.137.126:8080"
+		echo 'export http_proxy="http://10.42.137.126:8080"' >> /etc/profile
+		echo 'export https_proxy="http://10.42.137.126:8080"' >> /etc/profile
+		echo 'http_proxy="http://10.42.137.126:8080"' >>/etc/environment
+		echo 'https_proxy="http://10.42.137.126:8080"' >>/etc/environment
+		mkdir ~/.subversion
+		echo '[global]' >> ~/.subversion/servers
+		echo "http-proxy-host = 10.42.137.126" >> ~/.subversion/servers
+		echo "http-proxy-port = 8080" >> ~/.subversion/servers
+		if [ $os = "Ubuntu" ]
+		then
+			printf 'Acquire::http::proxy "%s";\nAcquire::https::proxy "%s";\nAcquire::ftp::proxy "%s";\n' $http_proxy $http_proxy $http_proxy >/etc/apt/apt.conf.d/00proxy
+		else
+			echo "proxy=$http_proxy" >> /etc/yum.conf
+		fi
+		git config --system http.proxy $http_proxy
+		git config --system https.proxy $https_proxy
+	fi
+
+	if (echo "$MYIP" | grep -qE '10\.0\.{0,1}\.[0-9]{1,3}'); then
+		echo "IP range ($MYIP) detected as Surrey"
+		echo "adding DNAT rules"
+		for _ip in {1..254}; do
+			iptables -t nat -A OUTPUT -d 172.20.16.${_ip}/32 -j DNAT --to-destination 10.5.20.${_ip}
+			iptables -t nat -A OUTPUT -d 172.20.17.${_ip}/32 -j DNAT --to-destination 10.5.21.${_ip}
+			iptables -t nat -A OUTPUT -d 172.20.18.${_ip}/32 -j DNAT --to-destination 10.5.22.${_ip}
+			iptables -t nat -A OUTPUT -d 172.20.19.${_ip}/32 -j DNAT --to-destination 10.5.23.${_ip}
+		done
+	fi
+}
 
 ################
 #### Ubuntu ####
@@ -139,6 +205,10 @@ fi
 
 case ${os} in
     ubuntu) 
+	    ipConfigUbuntu
+	    detectTestbed
+	    waitForInternet
+
 	    install_ems_on_ubuntu
         if [ -z "${MONITORING_IP}" ]; then
             echo "No MONITORING_IP is defined, I will not download zabbix-agent"
@@ -147,6 +217,10 @@ case ${os} in
         fi
 	    ;;
     centos)
+	    ipConfigCentos
+            detectTestbed
+            waitForInternet
+
 	    install_ems_on_centos
         if [ -z "${MONITORING_IP}" ]; then
             echo "No MONITORING_IP is defined, I will not download zabbix-agent"
